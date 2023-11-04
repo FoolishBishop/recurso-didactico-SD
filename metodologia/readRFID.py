@@ -1,0 +1,3 @@
+def read_rfid():
+    # ...
+    print("test")
