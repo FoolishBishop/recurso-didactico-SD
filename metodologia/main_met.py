@@ -6,7 +6,7 @@ import screen_show as ss
 # https://pimylifeup.com/raspberry-pi-rfid-rc522/
 # https://youtu.be/fR5XhHYzUK0?si=nQBOyccd5YHMkyzt
 # pins led:
-# sda: pin 2
+# sda: pin 3
 # scl: pin 5 
 # vcc = 3.3 v
 
