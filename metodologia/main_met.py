@@ -3,6 +3,12 @@ import readRFID as rfidread
 import screen_show as ss
 
 # ESTE ES CON SOLO UN RFID!!!!!!!!
+# https://pimylifeup.com/raspberry-pi-rfid-rc522/
+# https://youtu.be/fR5XhHYzUK0?si=nQBOyccd5YHMkyzt
+# pins led:
+# sda: pin 2
+# scl: pin 5 
+# vcc = 3.3 v
 
 old_letter = None
 while True:
