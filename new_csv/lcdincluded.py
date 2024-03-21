@@ -29,6 +29,7 @@ def find_file(hexcode):
             if row[0] == str(hexcode):
                 return row
 
+
 """"
 def show_screen(row_hex):
     # ! /usr/bin/env python
@@ -55,6 +56,8 @@ def show_screen(row_hex):
     except KeyboardInterrupt:
         display.lcd_clear()
 """""
+
+
 def main():
     lcd.lcd_init()
     lcd.lcd_byte(lcd.LCD_LINE_1, lcd.LCD_CMD)
