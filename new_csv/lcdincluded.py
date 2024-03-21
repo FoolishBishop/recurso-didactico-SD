@@ -3,7 +3,7 @@ from time import sleep
 # drivers es una carpeta con lo complicado y tembo
 # fuente: https://github.com/the-raspberry-pi-guy/lcd
 # se cambio a otro coso asi que ahora es este:
-import lcdfunctionm4 as lcd
+import lcdfunctionm4 as lsd
 import RPi.GPIO as GPIO
 from mfrc522 import SimpleMFRC522
 import csv
@@ -59,8 +59,6 @@ def show_screen(row_hex):
 
 
 def main():
-    lcd.lcd_init()
-    lcd.lcd_byte(lcd.LCD_LINE_1, lcd.LCD_CMD)
     hexc_old = None
     while True:
         hexcode = read_rfid()
@@ -69,15 +67,18 @@ def main():
             list_row = find_file(hexcode)
             print("mostrando en pantalla...")
             # show_screen(list_row) <-- (old)
-            lcd.lcd_string(list_row, 2)
+            lsd.lcd_string(list_row, 2)
             hexc_old = hexcode
 
-
 if __name__ == "__main__":
+    lsd.lcd_init()
+    lsd.lcd_byte(lsd.LCD_LINE_1, lsd.LCD_CMD)
     sleep(1)
     print("esta corriendo")
+    lsd.lcd_string("tengo cancer", 2)
+
     try:
         main()
     except KeyboardInterrupt:
-        lcd.GPIO.cleanup()
+        lsd.GPIO.cleanup()
         print("Exiting gracefully.")
