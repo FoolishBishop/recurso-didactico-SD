@@ -38,7 +38,7 @@ MFRC522 mfrc522(SS_1_PIN, RST_PIN);
 
 // Pre-calculate limits and threshold for readability
 const byte MAX_POS = 50;
-const byte CHANGE_THRESHOLD = 5;
+const byte CHANGE_THRESHOLD = 3;
 byte letra = 0;
 
 // Flag for detecting changes in encoder direction
@@ -107,13 +107,13 @@ void loop() {
     String temp_var = dump_byte_arrayToString(mfrc522.uid.uidByte, mfrc522.uid.size);
     Serial.println("TH" + temp_var);
     // usar pantalla
-    screen(temp_var);
 
     // lo de abajo es para RFID, mejor no tocar
     mfrc522.PICC_HaltA();
     mfrc522.PCD_StopCrypto1();
   }
 }
+
 
 String dump_byte_arrayToString(byte *buffer, byte bufferSize) {
   String hexString = "";
@@ -130,4 +130,29 @@ void screen(String val) {
   u8g2.sendBuffer();                   // transfer internal memory to the display
   delay(100);
   u8g2.clearBuffer();  // clear the internal memory
+}
+
+bool verify_if_showable(String data){
+  // solo si inicia con "SS"
+  return data.startsWith("SS");
+}
+
+void verify_and_show(String receivedData){
+  if (verify_if_showable(receivedData)){
+    screen(receivedData.substring(2));
+  } 
+}
+
+void mostrar_hex_screen(String hex_val){
+    if (Serial.available()) {
+    String receivedData = Serial.readString();  // Leer los datos recibidos
+    verify_and_show(receivedData);
+  }
+  else {
+    String receivedData = Serial.readString();  // Leer los datos recibidos
+    verify_and_show(receivedData);
+  }
+
+
+
 }
