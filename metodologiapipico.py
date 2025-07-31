@@ -1,49 +1,45 @@
-from machine import Pin, UART
+# Codigo mas reciente
+
+from machine import Pin, I2C
 from time import sleep
+import sys
 
 
-""""
-Al recibir mensajes del Arduino, reaccionara con estos dos tipos de mensajes:
-    - Tipo 1: TI[index]
-    - Tipo 2: TH[hex_value]
-"""
+def setup():
+    # Correr al inicio
+    if not devices:
+        print("No se encontró ningún dispositivo I2C.")
+        sys.exit()
 
-# Transforma los mensajes decodeados y actualiza palabra interna o index/cursor
-
-
-def process_hex_idx(raw_data: str, intern_w: str, index: int) -> int | str:
-    # Caso 1
-    if raw_data.startswith("TI"):
-        try:
-            index = int(raw_data[2:])
-        except ValueError:
-            print("### ERROR: Valor de indice no se pudo procesar como numero ###")
-            index = 0
-        # TODO: funcion para actualizar en pantalla
-        return index, None
-
-    # Caso 2
-    global hex_db
-    if raw_data.startswith("TH"):
-        column_value = find_file(raw_data[2:], 0, hex_db)
-        if column_value is None:
-            print("### ERROR: No se encontro el hex_value en la base de datos ###")
-        letra = column_value[1]
-        return index, replace_str_index(intern_w, index, letra)
+# Funciones para envio y recibimiento de datos
 
 
-# Adquiere datos de Arduino UNO"
-def obtener_datos_ard_uno() -> str:
-    while True:
-        if uart0.any():
-            data = uart0.readline()
-            decodeado = data.decode()
-            print(decodeado)
-            return decodeado
-        sleep(0.5)
+def sendData(x):
+    i2c.writeto(addr, x.encode('utf-8'))  # Siempre enviar en bytes
 
+
+def receiveData():
+    """"
+    Al recibir mensajes del Arduino se recibiran de esta forma:
+    ID_RAW,INDEX
+    """
+
+    data = i2c.readfrom(addr, MSG_SIZE)
+    print("Respuesta bruta:", data)
+    end_idx = data.find(b'\n')  # Buscar hasta el delimitador \n
+    if end_idx != -1:
+        clean = data[:end_idx].decode('utf-8').strip()
+        print("Respuesta:", clean)
+        return clean
+    else:
+        print("Algo salio mal. Respuesta sin delimitador:", data)
+        return data
+
+# Funciones para procesamiento de datos
 
 # Reemplaza mediante index en una string, para palabra_interna
+
+
 def replace_str_index(text: str, index: int, replacement: str) -> str:
     return f'{text[:index]}{replacement}{text[index+1:]}'
 
@@ -61,67 +57,46 @@ def find_file(value: str, column_position: int, file: str) -> list | None:
         return None
 
 
-# Revisa en la base de datos de palabras si existe (para imagen)
-def revisar_si_es_palabra(val_interna) -> bool:
-    global words_db
-    if find_file(val_interna, 0, words_db) != None:
-        return True
-    else:
-        return False
-
-
-""""
-NO ESTA EN USO HASTA PROXIMA CONEXION DE ARDUINO MEGA!
-
-# funcion que enviara la informacion al MEGA, si no hay imagen mandar None (?)
-def send_to_MEGA(word, image) -> None:
-    mensaje = f"{word},{image}"
-    uart2.write(mensaje)
-    print("data mandada a Arduino MEGA")
-"""
-
-# Constantes
-# TODO: colocar los paths correctos mas adelante
-hex_db = '/database.csv'
-words_db = '/words.csv'
-
-
-# TODO: modificar codigo para poder volver a casilla vacia (ver arduinos? o boton de reinicio?)
-# TODO: revisar si posicion 1 tiene indice 0
+# Codigo principal
 def main():
-    global words_db
-    cursor = 0
+    # Variables paths (corroborar que sean los correctos)
+    hex_db = '/database.csv'
+    # words_db = '/words.csv'
+
+    # Varibales procesamiento de datos
     palabra_interna = "    "
 
+    # Variables de comunicacion
+    MSG_SIZE = 32
+    i2c = I2C(0, scl=Pin(17), sda=Pin(16), freq=100000)
+    devices = i2c.scan()
+    addr = devices[0]
+    print(f"Dispositivo I2C encontrado en dirección: {hex(addr)}")
+
+    setup()
     while True:
-        # Recibe y actualiza
-        data = obtener_datos_ard_uno()
-        print(f"SS{data}")
-        cursor, new_intern = process_hex_idx(data, palabra_interna, cursor)
-        if new_intern != None:
-            palabra_interna = new_intern
+        # Hacer para esperar hasta recibir nueva data
+        received_data = receiveData()
+        print(f"Data recibida: {received_data}")
+        received_data = received_data.split(",")
+        try:
+            index = int(received_data[1])
+            column_value = find_file(received_data[0], 0, hex_db)
+            if column_value:
+                # Si se detecta el valor RFID en la base de datos
+                letra = column_value[1]
+                palabra_interna = replace_str_index(
+                    palabra_interna, index, letra)
+                print(f"Palabra interna: {palabra_interna}")
+                # ^ No manda indice porque por si solo se dara cuenta de donde colocar
+                sendData(letra)
+                # Mas adelante, agregar señal en el caso necesario cuando se asocia a una imagen, todo en este if
 
-        # Para imagen
-        # Actualmente no esta en uso
-        """"
-        if revisar_si_es_palabra(palabra_interna):
-            imagen = find_file(palabra_interna, 0, words_db)
-            send_to_MEGA(palabra_interna, imagen)
-            print("## ENCVIADO A PANTALLA CON IMAGEN ##")
-        else:
-            send_to_MEGA(palabra_interna, None)
-        """
+        except ValueError:
+            print("error en procesamiento de indice")
+            index = 0
+
+        # TODO: funcion para actualizar en pantalla
 
 
-if __name__ == "__main__":
-    # Inicializacion de comunicacion cor Arduino UNO
-    uart0 = UART(1, baudrate=9600, tx=Pin(4), rx=Pin(5))
-
-    # Led del Pi Pico
-    led = Pin(25, Pin.OUT)
-
-    # encender/apagar led
-    led.toggle()
-
-    print("pico listo")
-    main()
+main()
