@@ -25,7 +25,10 @@
 #define UNO_ADDR 9
 #define RESP_SIZE 15
 // Variable transferencia de datos
-String data = "";
+String dataToSend = "";
+String lastReceived = "";
+bool dataUpdated = false;
+String letraRecibida = "";
 
 // Configuración de la pantalla ILI9341
 // UTFT myGLCD(ILI9341_16, 38, 39, 40, 41);
@@ -61,6 +64,7 @@ RotaryEncoder encoder(PIN_IN1, PIN_IN2, RotaryEncoder::LatchMode::TWO03);
 const byte MAX_POS = 25;
 const byte CHANGE_THRESHOLD = 3;
 byte letra_pos = 0;
+byte letra_pos_raw = 0;
 
 // Flag for detecting changes in encoder direction
 volatile bool directionChanged = false;
@@ -72,6 +76,9 @@ void setup() {
 
   // I2C
   Wire.begin(UNO_ADDR);
+  Wire.onRequest(DataRequest);
+  Wire.onReceive(DataReceive);
+  Serial.println(Wire.available());
   Serial.println("Comunicacion I2C lista");
 
 
@@ -96,7 +103,7 @@ void setup() {
   // drawLines();
   // Serial.println("Pantalla lista");
 
-  Serial.println("Arduino UNO listo");
+  Serial.println("Arduino UNO listo!");
 }
 
 void loop() {
@@ -123,8 +130,8 @@ void loop() {
     }
 
     if (pasosDesdeUltimoCambio == CHANGE_THRESHOLD) {
-      letra_pos += direccion;
-      letra_pos = (letra_pos + 4) % 4;  // Limitamos letra entre 0 y 3
+      letra_pos_raw += direccion;
+      letra_pos = (letra_pos_raw + 4) % 4;  // Limitamos letra entre 0 y 3
       pasosDesdeUltimoCambio = 0;
       Serial.println("Pos: " + String(letra_pos));
       // envia a pantalla !!!!!!!!!
@@ -151,37 +158,52 @@ void loop() {
         lastCardId = cardid;
         lastPos = letra_pos;
 
-        data = String(cardid) + "," + String(letra_pos);
-
-        Wire.onRequest(DataRequest);  // envia el hex value de rfid a pico
-        Wire.onReceive(DataReceive);  // pico devuelve el valor como letra
-        // usar pantalla
-        // showLetter(letra_pos, data);
+        // enviar
+        dataToSend = String(cardid) + "," + String(letra_pos);
+        dataUpdated = true;
+        Serial.println("Actualizado: " + dataToSend);
+        }
+DataRequest() ;
       }
     }
+  
+  // recibir mensaje pipico
+  if (letraRecibida != "") {
+    // Hacer algo con la letra, por ejemplo mostrarla en pantalla
+    Serial.println("RECIBIDO MENSAJE PIPICO: " + letraRecibida);
+    
+    // usar pantalla
+    // showLetter(letra_pos, data);
+
+    letraRecibida = "";  // limpiar para que no se repita
   }
-  success=0;
+
+DataRequest();
+  success = 0;
 }
 
 // !!! FUNCIONES !!!
 
 // Funciones de comunicacion I2C
 void DataReceive(int numBytes) {  // recibir data
-  int i = 0;
-  char recvData[RESP_SIZE];
-  memset(recvData, 0, RESP_SIZE);
+  lastReceived = "";
+
   while (Wire.available()) {
-    recvData[i++] = Wire.read();
+    char c = Wire.read();
+    lastReceived += c;
   }
 
-  Serial.println("Recv Event: ");
-  Serial.print(String(recvData));
+  Serial.println("Raspberry dijo: " + lastReceived);
 }
 
-void DataRequest() {              // mandar data
-  String response = data + "\n";  // Agrega salto de línea al final
-  Wire.write(response.c_str());   // Envía solo el contenido útil
-  Serial.println("Sent resp: " + response);
+void DataRequest() {  // mandar data
+  if (dataUpdated) {
+    Wire.write(dataToSend.c_str());
+    dataUpdated = false;  // Evita repetir el mismo mensaje
+    Serial.print("enviado");
+  } else {
+    Wire.write("");  // No hay datos nuevos
+  }
 }
 
 // Funciones de pantalla
