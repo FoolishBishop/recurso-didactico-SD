@@ -1,15 +1,41 @@
-# Codigo mas reciente
+# pn532_to_arduino.py — Pico lee PN532 y envía UID al Arduino (0x09)
+from machine import I2C, Pin
+from time import sleep_ms, ticks_ms, ticks_diff
+from pn532_i2c import PN532_I2C, PN532_I2C_ADDR
 
-from machine import Pin, I2C
-from time import sleep
-import sys
+UNO_ADDR = 0x09 # Arduino esclavo (Wire.begin(9))
 
+def send_to_arduino(i2c, text: str):
+    """Envía texto al UNO limitando a <=31 bytes (buffer típico de Wire ~32B)."""
+    payload = (text or "")[:31]
+    try:
+        i2c.writeto(UNO_ADDR, payload.encode())
+    except OSError as e:
+        print("I2C write falló:", e)
 
-# Funciones para procesamiento de datos
+def read_uid_once(nfc, timeout_ms=1000):
+    """
+    Devuelve UID (bytes) o None. Funciona con in_list_passive_target() o read_passive_target().
+    """
+    if hasattr(nfc, "in_list_passive_target"):
+        try:
+            ts = nfc.in_list_passive_target(0x00, 0x02) # 106 kbps Type A
+            if not ts:
+                return None
+            t0 = ts[0]
+            if isinstance(t0, dict):
+                return t0.get("uid", None)
+                return t0 if isinstance(t0, (bytes, bytearray)) else None
+        except Exception:
+            return None
 
-# Reemplaza mediante index en una string, para palabra_interna
-def replace_str_index(text: str, index: int, replacement: str) -> str:
-    return f'{text[:index]}{replacement}{text[index+1:]}'
+        if hasattr(nfc, "read_passive_target"):
+            try:
+                return nfc.read_passive_target(timeout_ms=timeout_ms)
+            except Exception:
+                return None
+
+    raise RuntimeError("Driver PN532 sin in_list_passive_target ni read_passive_target")
 
 
 # Busca en el CSV, devuelve lista de la fila que tiene el valor que buscabamos
@@ -25,105 +51,81 @@ def find_file(value: str, column_position: int, file: str) -> list | None:
         return None
 
 
-# Codigo principal
+
 def main():
+    # Variables importantes:
     # Variables paths (corroborar que sean los correctos)
     hex_db = '/database.csv'
     # words_db = '/words.csv'
 
-    # Varibales procesamiento de datos
-    palabra_interna = "    "
-
-    # Variables de comunicacion
-    MSG_SIZE = 32
-    i2c = I2C(0, scl=Pin(17), sda=Pin(16), freq=100000)
-    devices = i2c.scan()
     
-    print("Programa inciado")
-    if not devices:
-        print("No se encontró ningún dispositivo I2C.")
-        sys.exit()
-    print("Se detecto dispositivo I2C")
-    addr = devices[0]
-    n=0
+    # 1) I2C a 50 kHz para máxima estabilidad en clones; si todo ok, podés subir a 100_000
+    i2c = I2C(0, sda=Pin(16), scl=Pin(17), freq=50_000)
 
-    print("Bucle iniciado")
+    # 2) Instanciar driver con timeout generoso; activar debug=True si querés ver RX/RESP
+    nfc = PN532_I2C(i2c, debug=False, timeout_ms=2500)
+
+    # 3) Escaneo útil para confirmar PN532 (0x24) y Arduino (0x09)
+    devs = i2c.scan()
+    print("I2C scan:", [hex(d) for d in devs])
+    if PN532_I2C_ADDR not in devs:
+        print("⚠️ PN532 (0x24) no visible. Revisa jumpers I2C y GND común.")
+    if UNO_ADDR not in devs:
+        print("⚠️ Arduino (0x09) no visible. Revisa dirección/wiring.")
+
+    # 4) Wake-up suave del PN532
+    try:
+        i2c.writeto(PN532_I2C_ADDR, bytes([0x00]))
+        sleep_ms(10)
+    except OSError:
+        pass
+
+    # 5) Init PN532 (si tu clon es mañoso, puede fallar una vez; seguimos igual)
+    try:
+        fw = nfc.get_firmware_version()
+        print("PN532 FW:", fw)
+    except Exception as e:
+        print("GET_FIRMWARE falló (seguimos):", e)
+    try:
+        nfc.SAM_configuration()
+        print("SAM OK")
+    except Exception as e:
+        print("SAM_configuration falló (seguimos):", e)
+
+    # 6) Aviso al Arduino de que estamos listos
+    send_to_arduino(i2c, "READY")
+    print("Acerque una tarjeta (ISO14443A)...")
+
+    # 7) Loop de lectura con debouncing
+    last_uid = None
+    last_seen = 0
+
     while True:
-        # Recibir mensaje
-        """"
-        Al recibir mensajes del Arduino se recibiran de esta forma:
-        ID_RAW,INDEX
-        """
-
         try:
-            n+=1
-            data = str(i2c.readfrom(addr, MSG_SIZE))
-            print(type(data))
-            print("Respuesta bruta:", data)
-            print(f"{n}")
-            end_idx = data.find(b'\xff')  # Buscar hasta el delimitador /xff
-            print(f"end idx # {end_idx}")
-            if end_idx != -1:
-                print("if")
-                # print(len(data)) # 32 btw
-                received_data = data.decode('ascii', errors='ignore')
-                print(len(received_data))
-                print(received_data)
-                print("if end")
-            else:
-                print("Algo salio mal. Respuesta sin delimitador:", data)
-                received_data = None
-                sleep(1)
-                continue
-            
+            uid = read_uid_once(nfc, timeout_ms=800)
+            if uid:
+                now = ticks_ms()
+                if (last_uid != uid) or (ticks_diff(now, last_seen) > 1500):
+                    uid_hex = bytes(uid).hex().upper()
+                    print("UID:", uid_hex)
+                    
+                    column_value = find_file(uid_hex, 0, hex_db)
+                    if column_value:
+                        # Si se detecta el valor RFID en la base de datos
+                        letra = column_value[1]
+                        print(f"LETRA DE UID {uid_hex}: {letra}")
+                    else:
+                        letra = None
+                    
+                    send_to_arduino(i2c, "UID:" + letra)
+                    last_uid, last_seen = uid, now
+                    sleep_ms(60) # enfriar cuando hay tarjeta presente
+                else:
+                    sleep_ms(150) # menos CPU cuando no hay tarjeta
         except Exception as e:
-            # print(f"[I2C Error al recibir]: {e}")
-            received_data = None
-            sleep(1)
-            continue
+            print("Lectura falló:", e)
+            sleep_ms(120)
 
-        print(f"Data recibida: {received_data}")
-
-        # Procesamiento de mensaje
-        if received_data != None:
-            print("NO FUCKING WAY SI FUNCIONO")
-            sleep(10)
-            try:
-                received_data = received_data.split(",")
-
-                if len(received_data) < 2:
-                    print("Formato de datos inválido. Esperado: ID,INDEX")
-                    continue
-
-                index = int(received_data[1])
-                print(f"Index: {index}")
-                column_value = find_file(received_data[0], 0, hex_db)
-                if column_value:
-                    # Si se detecta el valor RFID en la base de datos
-                    letra = column_value[1]
-                    palabra_interna = replace_str_index(
-                        palabra_interna, index, letra)
-                    print(f"Palabra interna: {palabra_interna}")
-                    # ^ No manda indice porque por si solo se dara cuenta de donde colocar
-
-                    # Enviar al Arduino la letra del UID
-                    try:
-                        i2c.writeto(addr, letra.encode('utf-8'))
-                    except Exception as e:
-                        print(f"[I2C Error al enviar]: {e}")
-                    # Mas adelante, agregar señal en el caso necesario cuando se asocia a una imagen, todo en este if
-
-            except ValueError:
-                print("error en procesamiento de indice")
-                index = 0
-            except Exception as e:
-                print(f"Error inesperado: {e}")
-
-        sleep(0.1)  # Para que no explote
-
-        # TODO: funcion para actualizar en pantalla
-        # TODO: funcion para ver si se puede hacer lista o no las variables recibidas, si no se puede entonces ignorar epicamente
-
-
-main()
+if __name__ == "__main__":
+    main()
 
